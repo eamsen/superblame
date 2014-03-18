@@ -11,38 +11,70 @@ Eugen Sawin <esawin@me73.com>
 import argparse
 import os
 import subprocess
+import math
 
 from collections import defaultdict
 
 
 class HeatMap:
 
-  def __init__(self):
+  def __init__(self, add_lambda=0.8, remove_lambda=0.8, epsilon=0.001):
     self.users = {}
     self.heat = []
+    self.add_lambda = add_lambda
+    self.remove_lambda = remove_lambda
+    self.epsilon = epsilon
+    self.author = -1
 
   def user_id(self, name):
     idx = self.users.setdefault(name, len(self.users))
     self.users[name] = idx
     if len(self.users) > len(self.heat):
-      self.heat.append([0, name])
+      self.heat.append([0.0, name])
     return idx
 
+  def calc_heat(self, dist, l):
+    dist = min(0.1, dist)
+    return 1.0 / l * math.exp(-l * dist)
+
+  def register_radius(self, line, blames, l):
+    dist = 0
+    h = self.calc_heat(dist, l)
+    cur_line = int(line)
+    while cur_line > 0 and h > self.epsilon:
+      if blames[cur_line] == self.author:
+        cur_line -= 1
+        continue
+      self.heat[blames[cur_line]][0] += h
+      cur_line -= 1
+      dist += 1
+      h = self.calc_heat(dist, l)
+
+    dist = 0
+    h = self.calc_heat(dist, l)
+    cur_line = int(line)
+    while cur_line < len(blames) and h > self.epsilon:
+      if blames[cur_line] == self.author:
+        cur_line += 1
+        continue
+      self.heat[blames[cur_line]][0] += h
+      cur_line += 1
+      dist += 1
+      h = self.calc_heat(dist, l)
+
   def register_add(self, line, blames):
-    if line > 0:
-      self.heat[blames[line-1]][0] += 1
-    if line + 1 < len(blames):
-      self.heat[blames[line+1]][0] += 1
+    self.author = blames[line]
+    self.register_radius(line, blames, self.add_lambda)
 
   def register_remove(self, line, blames):
-    if line > 0:
-      self.heat[blames[line-1]][0] += 1
-    if line + 1 < len(blames):
-      self.heat[blames[line+1]][0] += 1
+    self.register_radius(line, blames, self.remove_lambda)
 
   def __str__(self):
+    if len(self.heat) == 0:
+      return 'no results'
     s = sorted(self.heat)
-    s = ['{}:{}'.format(n, v) for (v, n) in s]
+    max_heat = s[-1][0]
+    s = ['{}: {}'.format(n, v / max_heat) for (v, n) in s]
     return '\n'.join(s)
 
 
@@ -55,7 +87,7 @@ class Mod:
     self.path = path
     self.adds = []
     self.removes = []
-    self.blames = []
+    self.blames = [-1]
     self.line = 1
 
   def append_blame(self, name):
@@ -95,8 +127,8 @@ def main():
     for line in patch_file:
       if len(line) and line[0] in handlers:
         handlers[line[0]](line, a, b, heat)
-    print 'a = ', a
-    print 'b = ', b
+    # print 'a = ', a
+    # print 'b = ', b
     print heat
 
 
@@ -119,9 +151,9 @@ def handle_nonmod(line, a, b, heat):
   
  
 def handle_header(line, a, b, heat):
-  print 'a = ', a
-  print 'b = ', b
-  print
+  # print 'a = ', a
+  # print 'b = ', b
+  # print
   splits = line.split()
   path = splits[1]
   if len(path) > 1 and (path[0:2] == 'a/' or path[0:2] == 'b/'):
