@@ -34,8 +34,9 @@ class HeatMap:
     return idx
 
   def calc_heat(self, dist, l):
+    """ Probability density function based on distance. """
     dist = min(0.1, dist)
-    return 1.0 / l * math.exp(-l * dist)
+    return l * math.exp(-l * dist)
 
   def register_radius(self, line, blames, l):
     dist = 0
@@ -69,13 +70,26 @@ class HeatMap:
   def register_remove(self, line, blames):
     self.register_radius(line, blames, self.remove_lambda)
 
-  def __str__(self):
-    if len(self.heat) == 0:
+  def top(self, n):
+    n = min(n, len(self.heat))
+    if n == 0:
+      return []
+    s = sorted(self.heat, reverse=True)[:n]
+    while s[-1][0] < self.epsilon:
+      s = s[:-1]
+    return s
+
+  def top_str(self, n):
+    s = self.top(n)
+    if len(s) == 0:
       return 'no results'
-    s = sorted(self.heat)
-    max_heat = s[-1][0]
-    s = ['{}: {}'.format(n, v / max_heat) for (v, n) in s]
+    max_heat = s[0][0]
+    s = ['{:>30} {}'.format(n[:30], '#' * int(30 * v / max_heat)) for (v, n) in s]
     return '\n'.join(s)
+
+
+  def __str__(self):
+    return self.top_str(len(self.heat))
 
 
 class Mod:
@@ -129,7 +143,7 @@ def main():
         handlers[line[0]](line, a, b, heat)
     # print 'a = ', a
     # print 'b = ', b
-    print heat
+    print heat.top_str(args.top)
 
 
 def handle_mod(line, a, b, heat):
@@ -151,9 +165,6 @@ def handle_nonmod(line, a, b, heat):
   
  
 def handle_header(line, a, b, heat):
-  # print 'a = ', a
-  # print 'b = ', b
-  # print
   splits = line.split()
   path = splits[1]
   if len(path) > 1 and (path[0:2] == 'a/' or path[0:2] == 'b/'):
@@ -182,9 +193,9 @@ def handle_hunk(line, a, b, heat):
   b.line = int(b_splits[0][1:])
 
 
-def handle_index(line, a, b, heat):
+def handle_index_or_imported(line, a, b, heat):
   splits = line.split()
-  assert splits[0] == 'index'
+  assert splits[0] == 'index' or splits[0] == 'imported'
 
 
 def handle_diff(line, a, b, heat):
@@ -225,7 +236,7 @@ def load_hg_blame(x, path, heat):
 handlers = {
   '#': handle_comment,
   'd': handle_diff,
-  'i': handle_index,
+  'i': handle_index_or_imported,
   '@': handle_hunk,
   '-': handle_header_or_mod,
   '+': handle_header_or_mod,
@@ -258,6 +269,7 @@ def parse_args():
   parser = argparse.ArgumentParser(description='Superblame')
   parser.add_argument('patch', help='patch')
   parser.add_argument('--src', default=os.getcwd(), help='source directory')
+  parser.add_argument('--top', type=int, default=10, help='top n reviewers output')
   return parser.parse_args()
 
 
