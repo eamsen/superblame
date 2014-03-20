@@ -13,18 +13,15 @@ import os
 import subprocess
 import math
 
-from collections import defaultdict
-
 
 class HeatMap:
 
-  def __init__(self, add_lambda=0.8, remove_lambda=0.8, epsilon=0.001):
+  def __init__(self, add_lambda=0.1, remove_lambda=0.1, epsilon=0.001):
     self.users = {}
     self.heat = []
     self.add_lambda = add_lambda
     self.remove_lambda = remove_lambda
     self.epsilon = epsilon
-    self.author = -1
 
   def user_id(self, name):
     idx = self.users.setdefault(name, len(self.users))
@@ -33,42 +30,35 @@ class HeatMap:
       self.heat.append([0.0, name])
     return idx
 
-  def calc_heat(self, dist, l):
-    """ Probability density function based on distance. """
-    dist = min(0.1, dist)
-    return l * math.exp(-l * dist)
+  def calc_heat(self, dist, l, seq):
+    return seq / math.exp(l * dist)
 
-  def register_radius(self, line, blames, l):
-    dist = 0
-    h = self.calc_heat(dist, l)
-    cur_line = int(line)
+  def register_radius(self, line, blames, l, seq):
+    dist = 1
+    h = self.calc_heat(dist, l, seq)
+    cur_line = int(line) - 1
     while cur_line > 0 and h > self.epsilon:
-      if blames[cur_line] == self.author:
-        cur_line -= 1
-        continue
-      self.heat[blames[cur_line]][0] += h
+      author = blames[cur_line]
+      self.heat[author][0] += h
       cur_line -= 1
       dist += 1
-      h = self.calc_heat(dist, l)
+      h = self.calc_heat(dist, l, seq)
 
     dist = 0
-    h = self.calc_heat(dist, l)
+    h = self.calc_heat(dist, l, seq)
     cur_line = int(line)
     while cur_line < len(blames) and h > self.epsilon:
-      if blames[cur_line] == self.author:
-        cur_line += 1
-        continue
-      self.heat[blames[cur_line]][0] += h
+      author = blames[cur_line]
+      self.heat[author][0] += h
       cur_line += 1
       dist += 1
-      h = self.calc_heat(dist, l)
+      h = self.calc_heat(dist, l, seq)
 
-  def register_add(self, line, blames):
-    self.author = blames[line]
-    self.register_radius(line, blames, self.add_lambda)
+  def register_add(self, line, blames, seq):
+    self.register_radius(line, blames, self.add_lambda, seq)
 
-  def register_remove(self, line, blames):
-    self.register_radius(line, blames, self.remove_lambda)
+  def register_remove(self, line, blames, seq):
+    self.register_radius(line, blames, self.remove_lambda, seq)
 
   def top(self, n):
     n = min(n, len(self.heat))
@@ -84,7 +74,7 @@ class HeatMap:
     if len(s) == 0:
       return 'no results'
     max_heat = s[0][0]
-    s = ['{:>30} {}'.format(n[:30], '#' * int(30 * v / max_heat)) for (v, n) in s]
+    s = ['{:>30} #{}'.format(n[:30], '#' * int(30 * v / max_heat)) for v, n in s]
     return '\n'.join(s)
 
 
@@ -112,12 +102,14 @@ class Mod:
       self.adds[-1][1] += 1
     else:
       self.adds.append([line, 1])
+    return self.adds[-1][1]
 
   def append_remove(self, line):
     if len(self.removes) and self.removes[-1][0] == line:
       self.removes[-1][1] += 1
     else:
       self.removes.append([line, 1])
+    return self.removes[-1][1]
 
   def __str__(self):
     return "{{{},\n  {},\n  {},\n  {},\n  {},\n}}".format(
@@ -141,19 +133,20 @@ def main():
     for line in patch_file:
       if len(line) and line[0] in handlers:
         handlers[line[0]](line, a, b, heat)
-    # print 'a = ', a
-    # print 'b = ', b
     print heat.top_str(args.top)
 
 
 def handle_mod(line, a, b, heat):
+  if a.path is None:
+    return
+
   if line[0] == '+':
-    heat.register_add(b.line, b.blames)
-    a.append_add(a.line)
+    seq = a.append_add(a.line)
+    heat.register_add(a.line, a.blames, seq)
     b.line += 1
   elif line[0] == '-':
-    heat.register_remove(b.line, b.blames)
-    a.append_remove(a.line)
+    seq = a.append_remove(a.line)
+    heat.register_remove(a.line, a.blames, seq)
     a.line += 1
   else:
     assert False
@@ -164,16 +157,24 @@ def handle_nonmod(line, a, b, heat):
   b.line += 1
   
  
+blacklist = frozenset({'/dev/null'})
+def is_valid_path(path):
+  return path not in blacklist
+
+
 def handle_header(line, a, b, heat):
   splits = line.split()
   path = splits[1]
   if len(path) > 1 and (path[0:2] == 'a/' or path[0:2] == 'b/'):
     path = path[2:]
   if splits[0] == '---':
-    a.reset(path)
+    if is_valid_path(path):
+      a.reset(path)
+      load_blames(a, path, heat)
+    else:
+      a.reset(None)
   elif splits[0] == '+++':
     b.reset(path)
-    load_blames(b, path, heat)
   else:
     assert False
 
@@ -211,7 +212,7 @@ def handle_comment(line, a, b, heat):
 
 
 def load_git_blame(x, path, heat):
-  content = subprocess.check_output(['git', 'blame', path])
+  content = subprocess.check_output(['git', 'blame', 'HEAD', path])
   for line in content.split('\n'):
     start = line.find('(')
     if start == -1:
@@ -224,7 +225,7 @@ def load_git_blame(x, path, heat):
 
 
 def load_hg_blame(x, path, heat):
-  content = subprocess.check_output(['hg', 'annotate', '-u', path])
+  content = subprocess.check_output(['hg', 'annotate', '-u', '-r qparent', path])
   for line in content.split('\n'):
     end = line.find(':')
     if end == -1:
