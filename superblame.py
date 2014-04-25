@@ -135,12 +135,9 @@ class Mod:
     return self.removes[-1][1]
 
   def __str__(self):
-    return "{{{},\n  {},\n  {},\n  {},\n  {},\n}}".format(
+    return '{{{},\n  {},\n  {},\n  {},\n  {},\n}}'.format(
             self.path, self.adds, self.removes, self.blames, self.line)
 
-
-# Mapping of firs split to handler, populated at the end of file.
-handler = {}
 
 args = None
 
@@ -149,14 +146,30 @@ def main():
   global args
 
   args = parse_args()
-  with open(args.patch) as patch_file:
-    heat = HeatMap()
-    a = Mod()
-    b = Mod()
-    for line in patch_file:
-      if len(line) and line[0] in handlers:
-        handlers[line[0]](line, a, b, heat)
-    print heat.top_str(args.top)
+
+  if args.patch is None:
+    patch = extract_patch()
+  else:
+    patch = open(args.patch).read()
+
+  heat = parse_patch(patch)
+  print heat.top_str(args.top)
+
+
+def extract_patch():
+  vcs = identify_vcs()
+  assert vcs in patch_extractors
+  return patch_extractors[vcs]()
+    
+
+def parse_patch(patch):  
+  heat = HeatMap()
+  a = Mod()
+  b = Mod()
+  for line in patch:
+    if len(line) and line[0] in handlers:
+      handlers[line[0]](line, a, b, heat)
+  return heat
 
 
 def handle_mod(line, a, b, heat):
@@ -181,6 +194,7 @@ def handle_nonmod(line, a, b, heat):
   
  
 blacklist = frozenset({'/dev/null'})
+
 def is_valid_path(path):
   return path not in blacklist
 
@@ -203,7 +217,7 @@ def handle_header(line, a, b, heat):
 
 
 def handle_header_or_mod(line, a, b, heat):
-  if line[0] == line[1] and line[1] == line[2]:
+  if len(line) > 3 and line[0] == line[1] and line[1] == line[2]:
     return handle_header(line, a, b, heat)
   return handle_mod(line, a, b, heat);
 
@@ -257,6 +271,14 @@ def load_hg_blame(x, path, heat):
     x.append_blame(user)
 
 
+def extract_git_patch():
+  return subprocess.check_output(['git', 'diff']).split('\n')
+
+
+def extract_hg_patch():
+  return subprocess.check_output(['hg', 'export', 'tip']).split('\n')
+
+
 handlers = {
   '#': handle_comment,
   'd': handle_diff,
@@ -267,6 +289,10 @@ handlers = {
   ' ': handle_nonmod,
 }
 
+patch_extractors = {
+  'git': extract_git_patch,
+  'hg': extract_hg_patch,
+}
 
 blame_loaders = {
   'git': load_git_blame,
@@ -291,7 +317,7 @@ def identify_vcs():
 
 def parse_args():
   parser = argparse.ArgumentParser(description='Superblame')
-  parser.add_argument('patch', help='patch')
+  parser.add_argument('patch', nargs='?', help='patch')
   parser.add_argument('--src', default=os.getcwd(), help='source directory')
   parser.add_argument('--top', type=int, default=10, help='top n reviewers output')
   return parser.parse_args()
