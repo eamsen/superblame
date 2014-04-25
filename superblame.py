@@ -147,11 +147,14 @@ def main():
 
   args = parse_args()
 
-  if args.patch is None:
-    patch = extract_patch()
-  else:
-    patch = open(args.patch).read()
-
+  patch = extract_patch()
+  if args.patch is not None:
+    given_patch = open(args.patch).read()
+    if patch == given_patch:
+      print "Thanks for the patch! But I really don't need it for the current changeset.\n"
+    else:
+      args.use_tip = True
+  
   heat = parse_patch(patch)
   print heat.top_str(args.top)
 
@@ -166,7 +169,7 @@ def parse_patch(patch):
   heat = HeatMap()
   a = Mod()
   b = Mod()
-  for line in patch:
+  for line in patch.split('\n'):
     if len(line) and line[0] in handlers:
       handlers[line[0]](line, a, b, heat)
   return heat
@@ -249,7 +252,13 @@ def handle_comment(line, a, b, heat):
 
 
 def load_git_blame(x, path, heat):
-  content = subprocess.check_output(['git', 'blame', 'HEAD', path])
+  global args
+
+  if args.use_tip:
+    content = subprocess.check_output(['git', 'blame', path])
+  else:
+    content = subprocess.check_output(['git', 'blame', 'HEAD', path])
+
   for line in content.split('\n'):
     start = line.find('(')
     if start == -1:
@@ -262,7 +271,13 @@ def load_git_blame(x, path, heat):
 
 
 def load_hg_blame(x, path, heat):
-  content = subprocess.check_output(['hg', 'annotate', '-u', '-r qparent', path])
+  global args
+
+  if args.use_tip:
+    content = subprocess.check_output(['hg', 'annotate', '-u', path])
+  else:
+    content = subprocess.check_output(['hg', 'annotate', '-u', '-r qparent', path])
+
   for line in content.split('\n'):
     end = line.find(':')
     if end == -1:
@@ -272,11 +287,11 @@ def load_hg_blame(x, path, heat):
 
 
 def extract_git_patch():
-  return subprocess.check_output(['git', 'diff']).split('\n')
+  return subprocess.check_output(['git', 'diff'])
 
 
 def extract_hg_patch():
-  return subprocess.check_output(['hg', 'export', 'tip']).split('\n')
+  return subprocess.check_output(['hg', 'export', 'tip'])
 
 
 handlers = {
@@ -320,6 +335,7 @@ def parse_args():
   parser.add_argument('patch', nargs='?', help='patch')
   parser.add_argument('--src', default=os.getcwd(), help='source directory')
   parser.add_argument('--top', type=int, default=10, help='top n reviewers output')
+  parser.add_argument('--use_tip', type=bool, default=False, help='force using current revision')
   return parser.parse_args()
 
 
