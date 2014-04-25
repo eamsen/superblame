@@ -1,7 +1,8 @@
 # Superblame
 
 ### About
-Superblame helps you finding the best reviewer for a patch.
+Superblame is a simple recommendation system used to find a suitable reviewer for
+your patch.
 
 ### Version Control Support
 * Git
@@ -11,13 +12,40 @@ Superblame helps you finding the best reviewer for a patch.
 * Python 2.7
 
 ### Installation
+`superblame.py` is a stand-alone Python script and does not require
+installation. The install procedure only creates the symbolic link `superblame`
+in a common directory in your path (currently set to `/usr/bin`).
+
     make install
 
 ### Usage
-Navigate to the repository root, or use `--src` to set it accordingly.
-Use `--help` for more details.
+First, navigate to the repository root, or use `--src` to set it accordingly.
+
+#### Case 1: You want to find a reviewer for your current changeset
+Simply use
+
+    superblame
+
+#### Case 2: You want to find a reviewer for an existing patch
+Just provide the path to the patch
 
     superblame <patch>
+
+#### Output
+The output is a ranked list of code editors. The relevance of an editor to your
+changeset is given my the number of `#`. Let's look at the following output
+
+      Peter #######################
+    Grigory ##############
+        Eve ###########
+       Hans ####
+      Joshi ##
+    Randall #
+
+It tells us, that `Peter` is the most suitable reviewer for the changeset, with
+`Grigory` and `Eve` being good alternatives.
+
+Use `--help` for more details.
 
 ### License
 The MIT License.
