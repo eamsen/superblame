@@ -13,8 +13,9 @@ your patch.
 
 ### Installation
 `superblame.py` is a stand-alone Python script and does not require
-installation. The install procedure only creates the symbolic link `superblame`
+installation. The install procedure just creates the symbolic link `superblame`
 in a common directory in your path (currently set to `/usr/bin`).
+If that's what you want, just use
 
     make install
 
@@ -32,7 +33,7 @@ Just provide the path to the patch
     superblame <patch>
 
 #### Output
-The output is a ranked list of code editors. The relevance of an editor to your
+The output is a ranked list of editors. The relevance of an editor to your
 changeset is given my the number of `#`. Let's look at the following output
 
       Peter #######################
