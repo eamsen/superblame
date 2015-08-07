@@ -241,10 +241,11 @@ def handle_index_or_imported(line, a, b, heat):
 
 def handle_diff(line, a, b, heat):
   splits = line.split()
-  assert splits[0] == 'diff'
-  assert splits[1] == '--git'
-  assert splits[2][0] == 'a'
-  assert splits[3][0] == 'b'
+  if splits[0] == 'diff':
+      assert splits[1] == '--git'
+      assert splits[2][0] == 'a'
+      assert splits[3][0] == 'b'
+
 
 
 def handle_comment(line, a, b, heat):
@@ -255,9 +256,15 @@ def load_git_blame(x, path, heat):
   global args
 
   if args.use_tip:
-    content = subprocess.check_output(['git', 'blame', path])
+    try:
+        content = subprocess.check_output(['git', 'blame', path])
+    except:
+        content = subprocess.check_output(['git', 'blame', 'HEAD', '--', path])
   else:
-    content = subprocess.check_output(['git', 'blame', 'HEAD', path])
+    try:
+        content = subprocess.check_output(['git', 'blame', 'HEAD', '--', path])
+    except:
+        content = subprocess.check_output(['git', 'blame', 'HEAD~1', '--', path])
 
   for line in content.split('\n'):
     start = line.find('(')
@@ -287,7 +294,11 @@ def load_hg_blame(x, path, heat):
 
 
 def extract_git_patch():
-  return subprocess.check_output(['git', 'diff'])
+  patch = subprocess.check_output(['git', 'diff'])
+  if len(patch) == 0:
+      patch = subprocess.check_output(['git', 'show'])
+      patch = patch[patch.find('diff'):]
+  return patch
 
 
 def extract_hg_patch():
