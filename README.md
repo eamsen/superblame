@@ -9,7 +9,7 @@ your patch.
 * Mercurial
 
 ### Requirements
-* Python 2.7
+* Python 3.x
 
 ### Installation
 `superblame.py` is a stand-alone Python script and does not require
