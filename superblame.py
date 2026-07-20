@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 """
 Superblame
 
@@ -87,10 +87,8 @@ class HeatMap:
         n = min(n, len(self.heat))
         if n == 0:
             return []
-        s = sorted(self.heat, reverse=True)[:n]
-        while s[-1][0] < self.epsilon:
-            s = s[:-1]
-        return s
+        return [entry for entry in sorted(self.heat, reverse=True)[:n]
+                if entry[0] >= self.epsilon]
 
     def top_str(self, n):
         s = self.top(n)
@@ -147,13 +145,11 @@ def main():
 
     args = parse_args()
 
-    patch = extract_patch()
-    if args.patch is not None:
-        given_patch = open(args.patch).read()
-        if patch == given_patch:
-            print("Thanks for the patch! But I really don't need it for the current changeset.\n")
-        else:
-            args.use_tip = True
+    if args.patch is None:
+        patch = extract_patch()
+    else:
+        with open(args.patch, encoding='utf-8', errors='replace') as patch_file:
+            patch = patch_file.read()
 
     heat = parse_patch(patch)
     print(heat.top_str(args.top))
@@ -241,10 +237,9 @@ def handle_index_or_imported(line, a, b, heat):
 
 def handle_diff(line, a, b, heat):
     splits = line.split()
-    if splits[0] == 'diff':
-            assert splits[1] == '--git'
-            assert splits[2][0] == 'a'
-            assert splits[3][0] == 'b'
+    if splits[:2] == ['diff', '--git']:
+        assert splits[2][0] == 'a'
+        assert splits[3][0] == 'b'
 
 
 
@@ -255,54 +250,56 @@ def handle_comment(line, a, b, heat):
 def load_git_blame(x, path, heat):
     global args
 
-    if args.use_tip:
-        try:
-                content = subprocess.check_output(['git', 'blame', path])
-        except:
-                content = subprocess.check_output(['git', 'blame', 'HEAD', '--', path])
-    else:
-        try:
-                content = subprocess.check_output(['git', 'blame', 'HEAD', '--', path])
-        except:
-                content = subprocess.check_output(['git', 'blame', 'HEAD~1', '--', path])
+    revision = None if args.use_tip else ('HEAD^' if args.use_parent else 'HEAD')
+    command = ['git', 'blame', '--line-porcelain']
+    if revision:
+        command.append(revision)
+    command += ['--', path]
+    try:
+        content = vcs_output(command)
+    except subprocess.CalledProcessError:
+        content = vcs_output(['git', 'blame', '--line-porcelain', 'HEAD', '--', path])
 
-    for line in content.split('\n'):
-        start = line.find('(')
-        if start == -1:
-            break
-        end = line.find(')')
-        assert end != -1
-        splits = line[start+1:end].split()
-        user = heat.user_id(' '.join(splits[:-4]))
-        x.append_blame(user)
+    for line in content.splitlines():
+        if line.startswith('author '):
+            x.append_blame(heat.user_id(line[7:]))
 
 
 def load_hg_blame(x, path, heat):
     global args
 
     if args.use_tip:
-        content = subprocess.check_output(['hg', 'annotate', '-u', path])
+        command = ['hg', 'annotate', '-u', path]
     else:
-        content = subprocess.check_output(['hg', 'annotate', '-u', '-r qparent', path])
+        revision = 'p1(.)' if args.use_parent else '.'
+        command = ['hg', 'annotate', '-u', '-r', revision, path]
 
-    for line in content.split('\n'):
+    for line in vcs_output(command).splitlines():
         end = line.find(':')
         if end == -1:
-            break
+            continue
         user = heat.user_id(line[:end].strip())
         x.append_blame(user)
 
 
 def extract_git_patch():
-    patch = subprocess.check_output(['git', 'diff'])
+    patch = vcs_output(['git', 'diff', '--no-ext-diff'])
     if len(patch) == 0:
-            patch = subprocess.check_output(['git', 'show'])
-            patch = patch[patch.find('diff'):]
+        args.use_parent = True
+        patch = vcs_output(['git', 'show', '--format=', '--no-ext-diff'])
     return patch
 
 
 def extract_hg_patch():
-    return subprocess.check_output(['hg', 'export', 'tip'])
+    patch = vcs_output(['hg', 'diff'])
+    if len(patch) == 0:
+        args.use_parent = True
+        patch = vcs_output(['hg', 'export', 'tip'])
+    return patch
+
+
+def vcs_output(command):
+    return subprocess.check_output(command, cwd=args.src, text=True)
 
 
 handlers = {
@@ -346,8 +343,12 @@ def parse_args():
     parser.add_argument('patch', nargs='?', help='patch')
     parser.add_argument('--src', default=os.getcwd(), help='source directory')
     parser.add_argument('--top', type=int, default=10, help='top n reviewers output')
-    parser.add_argument('--use_tip', type=bool, default=False, help='force using current revision')
-    return parser.parse_args()
+    parser.add_argument('--use-tip', '--use_tip', action='store_true',
+                        help='force using the working copy for blame')
+    parsed = parser.parse_args()
+    parsed.src = os.path.abspath(parsed.src)
+    parsed.use_parent = False
+    return parsed
 
 
 if __name__ == '__main__':
